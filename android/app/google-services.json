@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "737945786105",
+    "project_id": "stridehub-9bd7f",
+    "storage_bucket": "stridehub-9bd7f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:737945786105:android:7c8254a3e8bae338833428",
+        "android_client_info": {
+          "package_name": "stridehub.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCYOlaPuwrpObLr_W2T6EjBfNQiMCjCxuU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
