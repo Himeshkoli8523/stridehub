@@ -41,4 +41,8 @@ class FriendService {
       'friends': FieldValue.arrayUnion([currentUser.uid]),
     });
   }
+
+  void rejectFriendRequest(String requestId) {}
+
+  void cancelFriendRequest(String requestId) {}
 }

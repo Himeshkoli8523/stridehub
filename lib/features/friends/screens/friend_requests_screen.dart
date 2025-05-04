@@ -12,7 +12,18 @@ class FriendRequestsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    User? currentUser = FirebaseAuth.instance.currentUser;
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      return Scaffold(
+        body: Center(
+          child: Text(
+            'Please log in to see friend requests.',
+            style: TextStyle(color: AppColors.textColor),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -26,161 +37,142 @@ class FriendRequestsScreen extends StatelessWidget {
       ),
       body: Column(
         children: [
-          Text(
-            'Incoming Friend Requests',
-            style: GoogleFonts.dosis(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textColor,
-            ),
+          _buildSectionTitle('Incoming Friend Requests'),
+          _buildFriendRequestList(
+            query: FirebaseFirestore.instance
+                .collection('friend_requests')
+                .where('to', isEqualTo: currentUser.uid)
+                .where('status', isEqualTo: 'pending'),
+            onAccept: (requestId, fromUserId) {
+              _friendService.acceptFriendRequest(requestId, fromUserId);
+            },
+            onReject: (requestId) {
+              _friendService.rejectFriendRequest(requestId);
+            },
           ),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('friend_requests')
-                  .where('to', isEqualTo: currentUser?.uid)
-                  .where('status', isEqualTo: 'pending')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return Center(child: CircularProgressIndicator());
-                }
-                var requests = snapshot.data!.docs;
-                if (requests.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'No incoming friend requests',
+          Divider(),
+          _buildSectionTitle('Outgoing Friend Requests'),
+          _buildFriendRequestList(
+            query: FirebaseFirestore.instance
+                .collection('friend_requests')
+                .where('from', isEqualTo: currentUser.uid)
+                .where('status', isEqualTo: 'pending'),
+            isOutgoing: true,
+            onCancel: (requestId) {
+              _friendService.cancelFriendRequest(requestId);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Text(
+        title,
+        style: GoogleFonts.dosis(
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+          color: AppColors.textColor,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFriendRequestList({
+    required Query query,
+    bool isOutgoing = false,
+    void Function(String requestId, String userId)? onAccept,
+    void Function(String requestId)? onReject,
+    void Function(String requestId)? onCancel,
+  }) {
+    return Expanded(
+      child: StreamBuilder<QuerySnapshot>(
+        stream: query.snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator());
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return Center(
+              child: Text(
+                isOutgoing ? 'No outgoing friend requests' : 'No incoming friend requests',
+                style: TextStyle(color: AppColors.textColor),
+              ),
+            );
+          }
+
+          var requests = snapshot.data!.docs;
+          List userIds =
+              requests.map((req) => isOutgoing ? req['to'] : req['from']).toList();
+
+          return FutureBuilder<QuerySnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('users')
+                .where(FieldPath.documentId, whereIn: userIds)
+                .get(),
+            builder: (context, userSnapshot) {
+              if (userSnapshot.connectionState == ConnectionState.waiting) {
+                return Center(child: CircularProgressIndicator());
+              }
+              if (!userSnapshot.hasData || userSnapshot.data!.docs.isEmpty) {
+                return Center(
+                  child: Text(
+                    'Users not found.',
+                    style: TextStyle(color: AppColors.textColor),
+                  ),
+                );
+              }
+
+              var users = {for (var doc in userSnapshot.data!.docs) doc.id: doc};
+
+              return ListView.separated(
+                itemCount: requests.length,
+                separatorBuilder: (_, __) => Divider(),
+                itemBuilder: (context, index) {
+                  var request = requests[index];
+                  var userId = isOutgoing ? request['to'] : request['from'];
+
+                  if (!users.containsKey(userId)) {
+                    return ListTile(title: Text('User not found'));
+                  }
+
+                  var user = users[userId]!;
+                  return ListTile(
+                    title: Text(
+                      user['fullName'],
                       style: TextStyle(color: AppColors.textColor),
                     ),
-                  );
-                }
-                return ListView.builder(
-                  itemCount: requests.length,
-                  itemBuilder: (context, index) {
-                    var request = requests[index];
-                    var fromUserId = request['from'];
-                    return FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(fromUserId)
-                          .get(),
-                      builder: (context, userSnapshot) {
-                        if (!userSnapshot.hasData) {
-                          return ListTile(
-                            title: Text('Loading...'),
-                          );
-                        }
-                        var user = userSnapshot.data!;
-                        var fullName = user['fullName'];
-                        var email = user['email'];
-                        return ListTile(
-                          title: Text(
-                            fullName,
-                            style: TextStyle(color: AppColors.textColor),
-                          ),
-                          subtitle: Text(
-                            email,
-                            style: TextStyle(color: AppColors.captionColor),
-                          ),
-                          trailing: Row(
+                    subtitle: Text(
+                      user['email'],
+                      style: TextStyle(color: AppColors.captionColor),
+                    ),
+                    trailing: isOutgoing
+                        ? IconButton(
+                            icon: Icon(Icons.close, color: Colors.red),
+                            onPressed: () => onCancel?.call(request.id),
+                          )
+                        : Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                icon: Icon(Icons.check),
-                                onPressed: () {
-                                  _friendService.acceptFriendRequest(
-                                      request.id, fromUserId);
-                                },
+                                icon: Icon(Icons.check, color: Colors.green),
+                                onPressed: () => onAccept?.call(request.id, userId),
                               ),
                               IconButton(
-                                icon: Icon(Icons.close),
-                                onPressed: () {
-
-                                },
+                                icon: Icon(Icons.close, color: Colors.red),
+                                onPressed: () => onReject?.call(request.id),
                               ),
                             ],
                           ),
-                        );
-                      },
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-          Divider(),
-          Text(
-            'Outgoing Friend Requests',
-            style: GoogleFonts.dosis(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textColor,
-            ),
-          ),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('friend_requests')
-                  .where('from', isEqualTo: currentUser?.uid)
-                  .where('status', isEqualTo: 'pending')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return Center(child: CircularProgressIndicator());
-                }
-                var requests = snapshot.data!.docs;
-                if (requests.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'No outgoing friend requests',
-                      style: TextStyle(color: AppColors.textColor),
-                    ),
                   );
-                }
-                return ListView.builder(
-                  itemCount: requests.length,
-                  itemBuilder: (context, index) {
-                    var request = requests[index];
-                    var toUserId = request['to'];
-                    return FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(toUserId)
-                          .get(),
-                      builder: (context, userSnapshot) {
-                        if (!userSnapshot.hasData) {
-                          return ListTile(
-                            title: Text('Loading...'),
-                          );
-                        }
-                        var user = userSnapshot.data!;
-                        var fullName = user['fullName'];
-                        var email = user['email'];
-
-                        return ListTile(
-                          title: Text(
-                            fullName,
-                            style: TextStyle(color: AppColors.textColor),
-                          ),
-                          subtitle: Text(
-                            email,
-                            style: TextStyle(color: AppColors.captionColor),
-                          ),
-                          trailing: IconButton(
-                            icon: Icon(Icons.close),
-                            onPressed: () {
-                              // Handle canceling friend request
-                            },
-                          ),
-                        );
-                      },
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ],
+                },
+              );
+            },
+          );
+        },
       ),
     );
   }
